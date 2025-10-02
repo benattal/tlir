@@ -270,7 +270,8 @@ class RadianceFieldPRBRT(mi.python.ad.integrators.common.RBIntegrator):
                         dr.backward_from(
                             δL * 
                             (
-                                sigmat * dr.detach(Le * sigmat / (sigmat * sigmat + 1.0))
+                                0.0
+                                + sigmat * dr.detach(Le * sigmat / (sigmat * sigmat + 1.0))
                                 + Le
                                 - trans_grad_buffer * dr.detach(L) * interaction_mask
                             )
@@ -301,6 +302,7 @@ class RadianceFieldPRBRT(mi.python.ad.integrators.common.RBIntegrator):
                 dr.backward_from(
                     δL * (
                         sigmat * dr.detach(Le / (sigmat * sigmat + 1.0))
+                        # sigmat * dr.detach(Le)
                     )
                 )
 
