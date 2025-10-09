@@ -89,18 +89,34 @@ def compute_loss(predicted: mi.TensorXf, target: mi.TensorXf, loss_type: str = '
 def upsample_parameters(opt: mi.ad.Adam, factor: int = 2) -> None:
     """
     Upsample the 3D texture parameters by the given factor.
-    
+
     Args:
         opt: Optimizer containing the parameters
         factor: Upsampling factor (default: 2)
     """
-    new_res = factor * opt['sigmat'].shape[0]
-    sh_degree = opt['sh_coeffs'].shape[-1]
-    new_shape = [new_res, new_res, new_res]
-    
-    # Use dr.resample instead of deprecated dr.upsample
-    opt['sigmat'] = dr.upsample(opt['sigmat'], new_shape)
-    opt['sh_coeffs'] = dr.upsample(opt['sh_coeffs'], new_shape)
+    # Detect which parameters exist (different integrators use different fields)
+    if 'ior_field' in opt:
+        # RadianceFieldEikonal (has both IOR and density)
+        new_res = factor * opt['ior_field'].shape[0]
+        new_shape = [new_res, new_res, new_res]
+        opt['ior_field'] = dr.upsample(opt['ior_field'], new_shape)
+        opt['sigmat'] = dr.upsample(opt['sigmat'], new_shape)
+        opt['sh_coeffs'] = dr.upsample(opt['sh_coeffs'], new_shape)
+
+        # Also upsample majorant grid
+        if 'majorant_grid' in opt:
+            opt['majorant_grid'] = dr.upsample(opt['majorant_grid'], new_shape)
+
+    elif 'sigmat' in opt:
+        # RadianceFieldPRB or RadianceFieldPRBRT (density only)
+        new_res = factor * opt['sigmat'].shape[0]
+        new_shape = [new_res, new_res, new_res]
+        opt['sigmat'] = dr.upsample(opt['sigmat'], new_shape)
+        opt['sh_coeffs'] = dr.upsample(opt['sh_coeffs'], new_shape)
+
+        # Also upsample majorant grid if it exists (ratio tracking)
+        if 'majorant_grid' in opt:
+            opt['majorant_grid'] = dr.upsample(opt['majorant_grid'], new_shape)
 
 
 def train_stage(scene: mi.Scene, 
@@ -153,7 +169,10 @@ def train_stage(scene: mi.Scene,
         
         # Apply constraints if not using ReLU
         if not config.use_relu:
-            opt['sigmat'] = dr.maximum(opt['sigmat'], 0.0)
+            if 'sigmat' in opt:
+                opt['sigmat'] = dr.maximum(opt['sigmat'], 0.0)
+            elif 'ior_field' in opt:
+                opt['ior_field'] = dr.maximum(opt['ior_field'], 0.0)
         
         params.update(opt)
         
@@ -173,23 +192,32 @@ def train_radiance_field(scene: mi.Scene,
                         progress_callback: Optional[Callable] = None) -> Dict[str, Any]:
     """
     Complete training loop for radiance field reconstruction.
-    
+
     Args:
         scene: Mitsuba scene
         sensors: List of camera sensors
         ref_images: List of reference images
         config: Training configuration
         progress_callback: Optional callback for progress updates
-        
+
     Returns:
         Dictionary containing training results
     """
     # Get scene parameters and create optimizer
     params = mi.traverse(scene.integrator())
-    opt = create_optimizer({
-        'sigmat': params['sigmat'], 
-        'sh_coeffs': params['sh_coeffs']
-    }, config.learning_rate)
+
+    # Determine which parameters to optimize based on integrator type
+    opt_params = {'sh_coeffs': params['sh_coeffs']}
+
+    if 'ior_field' in params:
+        # RadianceFieldEikonal (has both IOR and density)
+        opt_params['ior_field'] = params['ior_field']
+        opt_params['sigmat'] = params['sigmat']
+    elif 'sigmat' in params:
+        # RadianceFieldPRB or RadianceFieldPRBRT (density only)
+        opt_params['sigmat'] = params['sigmat']
+
+    opt = create_optimizer(opt_params, config.learning_rate)
     params.update(opt)
     
     all_losses = []

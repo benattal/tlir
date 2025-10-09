@@ -193,6 +193,7 @@ class RadianceFieldPRBRT(mi.python.ad.integrators.common.RBIntegrator):
         # Accumulated transmittance gradient
         trans_grad_buffer = mi.Float(0.0)
         w_acc = mi.Float(0.0)
+
         reservoir_t = mi.Float(0.0)
         reservoir_dt = mi.Float(0.0)
         
@@ -251,11 +252,10 @@ class RadianceFieldPRBRT(mi.python.ad.integrators.common.RBIntegrator):
                 else:
                     Le = mi.Spectrum(0.0)
 
-                # Transmittance gradient
-                trans_grad_buffer += sigmat
+                    # Transmittance gradient
+                    trans_grad_buffer += sigmat
 
-            tr = (1 - interaction_prob)
-            Tr *= tr
+            Tr *= (1 - interaction_prob)
 
             if self.stopgrad_density:
                 Tr = dr.detach(Tr)
@@ -273,11 +273,12 @@ class RadianceFieldPRBRT(mi.python.ad.integrators.common.RBIntegrator):
                                 sigmat * dr.detach(Le * sigmat / (sigmat * sigmat + 1.0))
                                 # (sigmat / dr.detach(sigmat)) * dr.detach(Le)
                                 + Le
-                                - trans_grad_buffer * dr.detach(L) * interaction_mask
+                                - trans_grad_buffer * dr.detach(L + Le) * interaction_mask
                             )
                         )
 
-            trans_grad_buffer *= (1.0 - interaction_mask)
+            if should_interact:
+                trans_grad_buffer = mi.Float(0.0)
             
             # Stop if throughput becomes too small
             active &= dr.any(mi.Spectrum(Tr) > self.min_throughput)
@@ -301,8 +302,8 @@ class RadianceFieldPRBRT(mi.python.ad.integrators.common.RBIntegrator):
 
                 dr.backward_from(
                     δL * (
-                        sigmat * dr.detach(Le / (sigmat * sigmat + 1.0))
-                        # sigmat * dr.detach(Le)
+                        sigmat * dr.detach(w_acc * Le / (sigmat * sigmat + 1.0))
+                        # sigmat * dr.detach(w_acc * Le)
                     )
                 )
 
@@ -322,8 +323,5 @@ class RadianceFieldPRBRT(mi.python.ad.integrators.common.RBIntegrator):
         self.grid_res = self.sigmat.shape[0]
         self.min_step_size = dr.max(self.bbox.extents()) / self.sigmat.shape[0] * 1e-2
 
-
-# Register the integrators with Mitsuba
 mi.register_integrator("rf_prb", lambda props: RadianceFieldPRB(props))
 mi.register_integrator("rf_prb_rt", lambda props: RadianceFieldPRBRT(props))
-

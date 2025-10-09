@@ -45,13 +45,23 @@ class ExperimentConfig:
     integrator_type: str = 'rf_prb'
     initial_density: float = 0.01
     initial_sh: float = 0.1
-    
+
     # Ratio tracking specific parameters (for rf_prb_rt)
     initial_majorant: float = 10.0
     stopgrad_density: bool = False
     min_step_size: float = 1e-4
     min_throughput: float = 1e-6
     max_num_steps: int = 10000
+
+    # Eikonal integrator specific parameters (for rf_eikonal)
+    initial_ior: float = 1.0
+    min_ior: float = 1.0
+    max_ior: float = 2.0
+    step_size_scale: float = 0.5
+    curvature_damping: float = 1.0
+    eikonal_initial_majorant: float = 10.0
+    eikonal_stopgrad_density: bool = False
+    eikonal_min_throughput: float = 1e-6
     
     # Scene parameters
     scene_file: str = './scenes/lego/scene.xml'
@@ -127,19 +137,36 @@ class ExperimentConfig:
             'use_relu': self.use_relu,
             'grid_res': self.grid_init_res,
             'sh_degree': self.sh_degree,
-            'initial_density': self.initial_density,
             'initial_sh': self.initial_sh
         }
-        
-        if self.integrator_type == 'rf_prb_rt':
+
+        if self.integrator_type == 'rf_prb':
             base_params.update({
+                'initial_density': self.initial_density
+            })
+        elif self.integrator_type == 'rf_prb_rt':
+            base_params.update({
+                'initial_density': self.initial_density,
                 'initial_majorant': self.initial_majorant,
                 'stopgrad_density': self.stopgrad_density,
                 'min_step_size': self.min_step_size,
                 'min_throughput': self.min_throughput,
                 'max_num_steps': self.max_num_steps
             })
-        
+        elif self.integrator_type == 'rf_eikonal':
+            base_params.update({
+                'initial_ior': self.initial_ior,
+                'initial_density': self.initial_density,
+                'min_ior': self.min_ior,
+                'max_ior': self.max_ior,
+                'step_size_scale': self.step_size_scale,
+                'max_steps': self.max_num_steps,
+                'curvature_damping': self.curvature_damping,
+                'initial_majorant': self.eikonal_initial_majorant,
+                'stopgrad_density': self.eikonal_stopgrad_density,
+                'min_throughput': self.eikonal_min_throughput
+            })
+
         return base_params
     
     def get_training_params(self) -> Dict[str, Any]:
@@ -242,12 +269,12 @@ def create_ratio_tracking_config(experiment_name: str = "ratio_tracking",
                                 stopgrad_density: bool = False) -> ExperimentConfig:
     """
     Create a configuration specifically for ratio tracking experiments.
-    
+
     Args:
         experiment_name: Name for the experiment
         initial_majorant: Initial majorant value
         stopgrad_density: Whether to stop gradients on density
-        
+
     Returns:
         ExperimentConfig instance for ratio tracking
     """
@@ -259,6 +286,48 @@ def create_ratio_tracking_config(experiment_name: str = "ratio_tracking",
         min_step_size=1e-4,
         min_throughput=1e-6,
         max_num_steps=10000
+    )
+
+
+def create_eikonal_config(experiment_name: str = "eikonal",
+                         initial_ior: float = 1.0,
+                         initial_density: float = 0.01,
+                         min_ior: float = 1.0,
+                         max_ior: float = 2.0,
+                         step_size_scale: float = 0.5,
+                         curvature_damping: float = 1.0,
+                         initial_majorant: float = 10.0,
+                         stopgrad_density: bool = False) -> ExperimentConfig:
+    """
+    Create a configuration specifically for eikonal raymarching experiments.
+
+    Args:
+        experiment_name: Name for the experiment
+        initial_ior: Initial index of refraction value
+        initial_density: Initial density value for scattering
+        min_ior: Minimum IOR (typically 1.0 for vacuum)
+        max_ior: Maximum IOR (typical materials: 1.3-2.5)
+        step_size_scale: Step size as fraction of grid resolution
+        curvature_damping: Damping factor for ray curvature
+        initial_majorant: Initial majorant for null-collision sampling
+        stopgrad_density: Whether to stop gradients on density
+
+    Returns:
+        ExperimentConfig instance for eikonal raymarching
+    """
+    return ExperimentConfig(
+        experiment_name=experiment_name,
+        integrator_type='rf_eikonal',
+        initial_ior=initial_ior,
+        initial_density=initial_density,
+        min_ior=min_ior,
+        max_ior=max_ior,
+        step_size_scale=step_size_scale,
+        curvature_damping=curvature_damping,
+        max_num_steps=1000,
+        eikonal_initial_majorant=initial_majorant,
+        eikonal_stopgrad_density=stopgrad_density,
+        eikonal_min_throughput=1e-6
     )
 
 
@@ -413,7 +482,7 @@ def validate_config(config: ExperimentConfig) -> List[str]:
         issues.append("num_iterations_per_stage must be positive")
     
     # Check integrator type
-    valid_integrators = ['rf_prb', 'rf_prb_rt']
+    valid_integrators = ['rf_prb', 'rf_prb_rt', 'rf_eikonal']
     if config.integrator_type not in valid_integrators:
         issues.append(f"integrator_type must be one of {valid_integrators}")
     
