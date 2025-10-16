@@ -255,12 +255,8 @@ class RadianceFieldPRBRT(mi.python.ad.integrators.common.RBIntegrator):
                     # Transmittance gradient
                     trans_grad_buffer += sigmat
 
-            Tr *= (1 - interaction_prob)
-
-            if self.stopgrad_density:
-                Tr = dr.detach(Tr)
-
-            L = L + Le if primal else L - Le
+            # L = L + Le if primal else L - Le
+            L = Le
 
             with dr.resume_grad(when=not primal):
                 if not primal:
@@ -271,14 +267,21 @@ class RadianceFieldPRBRT(mi.python.ad.integrators.common.RBIntegrator):
                             δL * 
                             (
                                 sigmat * dr.detach(Le * sigmat / (sigmat * sigmat + 1.0))
-                                # (sigmat / dr.detach(sigmat)) * dr.detach(Le)
                                 + Le
-                                - trans_grad_buffer * dr.detach(L + Le) * interaction_mask
+                                # - trans_grad_buffer * dr.detach(L + Le) * interaction_mask
+                                - trans_grad_buffer * dr.detach(Le) * interaction_mask
                             )
                         )
 
             if should_interact:
                 trans_grad_buffer = mi.Float(0.0)
+
+            # Update transmittance
+            Tr *= (1 - interaction_prob)
+            Tr = dr.detach(Tr)
+
+            # Stop if we've hit a particle
+            active &= ~should_interact
             
             # Stop if throughput becomes too small
             active &= dr.any(mi.Spectrum(Tr) > self.min_throughput)
@@ -303,7 +306,6 @@ class RadianceFieldPRBRT(mi.python.ad.integrators.common.RBIntegrator):
                 dr.backward_from(
                     δL * (
                         sigmat * dr.detach(w_acc * Le / (sigmat * sigmat + 1.0))
-                        # sigmat * dr.detach(w_acc * Le)
                     )
                 )
 

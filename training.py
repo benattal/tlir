@@ -94,20 +94,7 @@ def upsample_parameters(opt: mi.ad.Adam, factor: int = 2) -> None:
         opt: Optimizer containing the parameters
         factor: Upsampling factor (default: 2)
     """
-    # Detect which parameters exist (different integrators use different fields)
-    if 'ior_field' in opt:
-        # RadianceFieldEikonal (has both IOR and density)
-        new_res = factor * opt['ior_field'].shape[0]
-        new_shape = [new_res, new_res, new_res]
-        opt['ior_field'] = dr.upsample(opt['ior_field'], new_shape)
-        opt['sigmat'] = dr.upsample(opt['sigmat'], new_shape)
-        opt['sh_coeffs'] = dr.upsample(opt['sh_coeffs'], new_shape)
-
-        # Also upsample majorant grid
-        if 'majorant_grid' in opt:
-            opt['majorant_grid'] = dr.upsample(opt['majorant_grid'], new_shape)
-
-    elif 'sigmat' in opt:
+    if 'sigmat' in opt:
         # RadianceFieldPRB or RadianceFieldPRBRT (density only)
         new_res = factor * opt['sigmat'].shape[0]
         new_shape = [new_res, new_res, new_res]
@@ -156,6 +143,8 @@ def train_stage(scene: mi.Scene,
             img = mi.render(scene, params, sensor=sensors[sensor_idx], 
                           spp=config.spp, seed=it)
             loss = compute_loss(img, ref_images[sensor_idx], config.loss_type)
+            # loss += dr.mean(dr.abs(dr.grad(params['sigmat']))) * 100.0
+
             dr.backward(loss)
             total_loss += loss
             
@@ -163,7 +152,7 @@ def train_stage(scene: mi.Scene,
             if it == config.num_iterations_per_stage - 1:
                 dr.eval(img)
                 images.append(img)
-        
+
         losses.append(total_loss.array[0])
         opt.step()
         
@@ -171,8 +160,6 @@ def train_stage(scene: mi.Scene,
         if not config.use_relu:
             if 'sigmat' in opt:
                 opt['sigmat'] = dr.maximum(opt['sigmat'], 0.0)
-            elif 'ior_field' in opt:
-                opt['ior_field'] = dr.maximum(opt['ior_field'], 0.0)
         
         params.update(opt)
         
@@ -209,11 +196,7 @@ def train_radiance_field(scene: mi.Scene,
     # Determine which parameters to optimize based on integrator type
     opt_params = {'sh_coeffs': params['sh_coeffs']}
 
-    if 'ior_field' in params:
-        # RadianceFieldEikonal (has both IOR and density)
-        opt_params['ior_field'] = params['ior_field']
-        opt_params['sigmat'] = params['sigmat']
-    elif 'sigmat' in params:
+    if 'sigmat' in params:
         # RadianceFieldPRB or RadianceFieldPRBRT (density only)
         opt_params['sigmat'] = params['sigmat']
 
